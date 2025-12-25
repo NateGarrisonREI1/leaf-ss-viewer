@@ -1,1 +1,1104 @@
 
+<!--
+FILE: index.html
+DROP THIS ENTIRE FILE into your NEW GitHub repo (leaf-ss-viewer) as /index.html
+
+✅ Works as a single-page “viewer” on Vercel (static deploy)
+✅ Supports ANY number of snapshots (no more copy/paste pages)
+✅ Pager dots + swipe
+✅ Per-snapshot config (title, images, ranges, incentives)
+✅ Reset button resets to midpoint of LEAF range for THAT snapshot
+✅ Fixes your broken markup in Page 2 (missing closing divs)
+
+NOTE ABOUT IMAGES:
+Put your images in the SAME repo under /public (or /assets) and update paths below.
+For a pure static Vercel deploy, simplest is:
+  /images/old-furnace.png
+  /images/new-furnace.png
+Then set currentImg: "images/old-furnace.png"
+
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LEAF System Snapshots</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    :root { --leaf:#43a419; }
+    body{
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .glass{
+      background: rgba(24,24,27,.78);
+      backdrop-filter: blur(12px);
+    }
+    .soft-shadow{ box-shadow: 0 18px 45px rgba(0,0,0,.42); }
+    .pop{ transition: transform .18s ease; }
+    .pop:hover{ transform: translateY(-1px) scale(1.01); }
+    summary::-webkit-details-marker{ display:none; }
+
+    /* --- SLIDERS --- */
+    input[type="range"]{
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 32px;
+      background: transparent;
+      outline: none;
+      position: relative;
+      z-index: 3;
+    }
+    input[type="range"]::-webkit-slider-runnable-track{
+      height: 12px;
+      background: transparent;
+      border-radius: 999px;
+    }
+    input[type="range"]::-moz-range-track{
+      height: 12px;
+      background: transparent;
+      border-radius: 999px;
+    }
+    input[type="range"]::-webkit-slider-thumb{
+      -webkit-appearance: none;
+      appearance: none;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: var(--leaf);
+      border: 2px solid rgba(0,0,0,.55);
+      box-shadow: 0 12px 22px rgba(0,0,0,.45), 0 0 0 6px rgba(67,164,25,.12);
+      cursor: pointer;
+      margin-top: 1px;
+      transform: translateZ(0);
+    }
+    input[type="range"]::-moz-range-thumb{
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: var(--leaf);
+      border: 2px solid rgba(0,0,0,.55);
+      box-shadow: 0 12px 22px rgba(0,0,0,.45), 0 0 0 6px rgba(67,164,25,.12);
+      cursor: pointer;
+      transform: translateZ(0);
+    }
+
+    .slider-wrap{ position: relative; padding-top: 6px; padding-bottom: 6px; }
+
+    .range-band{
+      position: absolute;
+      left: 0; right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      height: 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.10);
+      overflow: hidden;
+      z-index: 1;
+    }
+    .range-band .fill{
+      position: absolute;
+      top: 0; bottom: 0; left: 0;
+      width: 0%;
+      border-radius: 999px;
+      background: rgba(67,164,25,.18);
+      z-index: 0;
+      transition: width .06s linear;
+    }
+    .range-band .ok{
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 0%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg,
+        rgba(67,164,25,.18),
+        rgba(67,164,25,.55),
+        rgba(67,164,25,.18)
+      );
+      border: 1px solid rgba(67,164,25,.55);
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,.25) inset,
+        0 0 16px rgba(67,164,25,.22);
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* Non-interactive marker (static bar) */
+    .range-band .marker{
+      position: absolute;
+      top: -6px;
+      width: 0;
+      height: 26px;
+      border-left: 2px solid rgba(255,255,255,.75);
+      filter: drop-shadow(0 4px 10px rgba(0,0,0,.55));
+      z-index: 3;
+      pointer-events: none;
+    }
+    .range-band .marker::after{
+      content:"";
+      position:absolute;
+      left:-6px;
+      top:-2px;
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--leaf);
+      border: 2px solid rgba(0,0,0,.55);
+      box-shadow: 0 10px 18px rgba(0,0,0,.40), 0 0 0 6px rgba(67,164,25,.10);
+    }
+
+    .band-label{
+      font-size: 10px;
+      color: rgba(255,255,255,.45);
+      display:flex;
+      justify-content: space-between;
+      margin-top: 6px;
+    }
+
+    /* --- Reset feel --- */
+    @keyframes softPop {
+      0%   { transform: scale(1); }
+      40%  { transform: scale(0.96); }
+      100% { transform: scale(1); }
+    }
+    @keyframes thumbBounce {
+      0%   { transform: scale(1); }
+      40%  { transform: scale(0.90); }
+      100% { transform: scale(1); }
+    }
+    @keyframes glowPulse {
+      0%   { box-shadow: 0 0 0 0 rgba(67,164,25,.00); }
+      50%  { box-shadow: 0 0 0 10px rgba(67,164,25,.14); }
+      100% { box-shadow: 0 0 0 0 rgba(67,164,25,.00); }
+    }
+    .reset-pop { animation: softPop .22s ease; }
+    .band-pulse { animation: glowPulse .28s ease; }
+    input.thumb-bounce::-webkit-slider-thumb{ animation: thumbBounce .22s ease; }
+    input.thumb-bounce::-moz-range-thumb{ animation: thumbBounce .22s ease; }
+
+    /* --- Swipe pages --- */
+    .snap-scroll{
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .snap-scroll::-webkit-scrollbar{ display:none; }
+
+    .snap-page{
+      scroll-snap-align: center;
+      width: 100%;
+      flex: 0 0 100%;
+    }
+
+    /* Pager dots */
+    .dot{
+      width: 8px; height: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.22);
+      border: 1px solid rgba(255,255,255,.18);
+      transition: transform .15s ease, background .15s ease;
+    }
+    .dot.active{
+      background: rgba(67,164,25,.95);
+      border-color: rgba(67,164,25,.75);
+      transform: scale(1.12);
+    }
+  </style>
+</head>
+
+<body class="bg-black text-white">
+<div class="min-h-screen">
+
+  <!-- HEADER -->
+  <header class="sticky top-0 z-30 bg-black/70 border-b border-neutral-800 backdrop-blur">
+    <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+      <div>
+        <div class="text-sm font-semibold">LEAF System Snapshot</div>
+        <div class="text-[11px] text-neutral-400">
+          <span id="pageLabel">Snapshot 1 of 1</span>
+        </div>
+      </div>
+
+      <!-- Pager dots (generated by JS) -->
+      <div class="flex items-center gap-2" id="pager"></div>
+    </div>
+  </header>
+
+  <!-- SWIPE CONTAINER -->
+  <div id="pages" class="snap-scroll overflow-x-auto flex"></div>
+
+  <!-- CTA -->
+  <div class="fixed bottom-0 inset-x-0 bg-black/80 border-t border-neutral-800 backdrop-blur">
+    <div class="max-w-md mx-auto px-4 py-3">
+      <button class="w-full bg-[var(--leaf)] text-black font-semibold py-3 rounded-full text-sm pop">
+        🔎 Get an exact bid from a contractor
+      </button>
+      <div class="text-[11px] text-neutral-400 text-center mt-1">
+        Compare the quote against your LEAF range
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- =========================
+     TEMPLATE (CLONED PER SNAPSHOT)
+     Keep this hidden.
+========================== -->
+<template id="snapshotTemplate">
+  <div class="snap-page">
+    <main class="leaf-page max-w-md mx-auto px-4 pt-5 pb-28 space-y-4">
+
+      <!-- HERO -->
+      <section class="glass rounded-3xl p-4 border border-neutral-800 soft-shadow pop">
+        <div class="text-lg font-extrabold tracking-tight mb-1" data-el="heroSystemTitle">System Title</div>
+        <div class="text-sm font-semibold text-neutral-200" data-el="heroSystemSubtitle">System Subtitle</div>
+
+        <div class="text-xs text-neutral-300 mt-1">
+          LEAF provides ranges so you can evaluate contractor quotes with confidence.
+        </div>
+
+        <div class="flex flex-wrap gap-2 mt-3">
+          <span data-el="heroSavingsPill" class="px-3 py-1 rounded-full bg-[var(--leaf)] text-black text-xs font-semibold">
+            Save ~$0–$0/mo
+          </span>
+          <span class="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-200 text-xs border border-emerald-500/30">
+            ~30–45% less CO₂
+          </span>
+        </div>
+
+        <div class="text-[11px] text-neutral-400 mt-2">
+          Note: higher-priced systems can increase savings slightly — but ROI can drop if the added cost doesn’t pay back over time.
+        </div>
+      </section>
+
+      <!-- CURRENT -->
+      <section class="glass rounded-3xl p-4 border border-red-500/30 soft-shadow pop">
+        <div class="flex justify-between mb-3">
+          <div class="text-sm font-semibold">📷 Current system</div>
+          <span class="text-[11px] px-3 py-1 rounded-full bg-red-500/15 text-red-200 border border-red-500/25">
+            Near end of life
+          </span>
+        </div>
+
+        <div class="flex gap-3">
+          <div class="w-24 h-24 rounded-3xl overflow-hidden border border-neutral-800">
+            <img data-el="currentImg" src="" alt="Current system photo" class="w-full h-full object-cover" />
+          </div>
+          <div class="flex-1 text-xs space-y-1">
+            <div class="font-semibold" data-el="currentName">Existing system</div>
+            <div>Annual cost: <b data-el="currentCost">$0–$0</b></div>
+            <div>Carbon: <b data-el="currentCarbon">0–0 lbs/yr</b></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RECOMMENDED -->
+      <section class="glass rounded-3xl p-4 border border-[var(--leaf)]/35 soft-shadow pop">
+        <div class="flex justify-between mb-3">
+          <div class="text-sm font-semibold">✨ Recommended upgrade</div>
+          <span class="text-[11px] px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-200 border border-emerald-500/30">
+            High efficiency
+          </span>
+        </div>
+
+        <div class="flex gap-3">
+          <div class="w-24 h-24 rounded-3xl overflow-hidden border border-neutral-800">
+            <img data-el="upgradeImg" src="" alt="Recommended upgrade photo" class="w-full h-full object-cover" />
+          </div>
+          <div class="flex-1 text-xs space-y-1">
+            <div class="font-semibold" data-el="recommendedName">Recommended system</div>
+            <div>Estimated yearly savings: <b data-el="yearlySavings">$0–$0</b></div>
+            <div>Carbon: <b data-el="upgradeCarbon">0–0 lbs/yr</b></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- COST & SAVINGS RANGE -->
+      <details class="glass rounded-3xl p-4 border border-neutral-800 soft-shadow pop">
+        <summary class="cursor-pointer">
+          <div class="flex justify-between items-center">
+            <div class="text-sm font-semibold">💰 Cost & savings range</div>
+            <span class="text-[11px] text-neutral-400">Tap for details</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs mt-3">
+            <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+              <div class="text-neutral-400">Install cost</div>
+              <div class="text-lg font-bold" data-el="leafInstallRangeBox">$0–$0</div>
+            </div>
+            <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+              <div class="text-neutral-400">Monthly savings</div>
+              <div class="text-lg font-bold" data-el="summarySavingsRange">$0–$0</div>
+            </div>
+          </div>
+        </summary>
+
+        <div class="mt-4 text-xs space-y-3">
+          <div class="font-semibold">Cost bar (non-interactive)</div>
+
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="flex items-center justify-between">
+              <div class="text-xs text-neutral-400">Your selected price</div>
+              <div class="text-sm font-bold" data-el="staticPriceValue">$0</div>
+            </div>
+
+            <div class="mt-3 slider-wrap" style="padding-top:14px; padding-bottom:10px;">
+              <div class="range-band" aria-hidden="true">
+                <div data-el="staticCostFill" class="fill"></div>
+                <div data-el="staticCostOK" class="ok"></div>
+                <div data-el="staticCostMarker" class="marker" style="left:0%;"></div>
+              </div>
+              <div class="band-label">
+                <span data-el="staticCostMinLabel">$0</span>
+                <span data-el="staticCostMaxLabel">$0</span>
+              </div>
+            </div>
+
+            <div class="mt-2 text-[11px] text-neutral-400">
+              LEAF range is highlighted. The marker shows your selected quote.
+            </div>
+          </div>
+
+          <div class="font-semibold">Why it’s a range</div>
+          <ul class="list-disc list-inside text-neutral-300 space-y-1">
+            <li>Based on similar installs in comparable homes</li>
+            <li>Accounts for typical labor, permits, and equipment size</li>
+            <li>Premium options can slightly increase savings, but ROI may drop if cost climbs faster than savings</li>
+            <li>Final scope can change due to ductwork/access/electrical needs</li>
+          </ul>
+        </div>
+      </details>
+
+      <!-- INTERACTIVE COST SLIDER + QUICK READ -->
+      <section class="glass rounded-3xl p-4 border border-neutral-800 soft-shadow pop">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold">🎚️ Test your quote</div>
+            <div class="text-[11px] text-neutral-400 mt-1">
+              Slide the price. Savings bumps slightly with higher system cost — but ROI can drop if price rises faster than savings.
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button data-el="resetBtn" class="text-[11px] px-3 py-1 rounded-full bg-neutral-900 border border-neutral-800 pop">
+              Reset
+            </button>
+
+            <span data-el="overallBadge" class="text-[11px] px-3 py-1 rounded-md bg-emerald-500/15 text-emerald-200 border border-emerald-500/30">
+              Looks good ✅
+            </span>
+          </div>
+        </div>
+
+        <div class="mt-4 rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+          <div class="flex items-center justify-between">
+            <div class="text-xs text-neutral-400">Contractor price</div>
+            <div class="flex items-center gap-2">
+              <span data-el="costBadge" class="text-[11px] px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-200 border border-emerald-500/30">
+                Within range
+              </span>
+              <div class="text-sm font-bold" data-el="priceValue">$0</div>
+            </div>
+          </div>
+
+          <div class="mt-3 slider-wrap">
+            <div class="range-band" aria-hidden="true">
+              <div data-el="priceBandFill" class="fill"></div>
+              <div data-el="priceBandOK" class="ok"></div>
+            </div>
+            <input data-el="priceSlider" type="range" min="0" max="100" step="100" value="0" />
+            <div class="band-label">
+              <span data-el="priceBandMinLabel">$0</span>
+              <span data-el="priceBandMaxLabel">$0</span>
+            </div>
+          </div>
+
+          <div class="mt-2 text-[11px] text-neutral-400">
+            LEAF price range: <b data-el="leafInstallRangeInline">$0–$0</b>
+          </div>
+          <div class="mt-2 text-[11px] text-neutral-400">
+            Estimated savings at this price: <b data-el="dynamicSavingsRange">$0–$0/mo</b>
+          </div>
+        </div>
+
+        <div class="mt-3 rounded-2xl bg-black/30 border border-neutral-800 p-3">
+          <div class="text-xs text-neutral-400">Quick read</div>
+          <div class="text-sm font-semibold mt-1" data-el="overallHeadline">This looks like a solid deal.</div>
+
+          <div class="mt-2 text-[11px] text-neutral-300">
+            <div class="font-semibold text-neutral-200">Good questions to ask the contractor</div>
+            <ul data-el="quickReadQuestionsVisible" class="list-disc list-inside mt-1 space-y-1"></ul>
+          </div>
+
+          <details class="mt-2">
+            <summary class="cursor-pointer text-[11px] text-emerald-300">
+              Why this message + more questions
+            </summary>
+
+            <div class="mt-2 text-[11px] text-neutral-300 space-y-3">
+              <div>
+                <div class="font-semibold text-neutral-200">Why LEAF is saying this</div>
+                <ul data-el="quickReadWhy" class="list-disc list-inside mt-1 space-y-1"></ul>
+              </div>
+
+              <div>
+                <div class="font-semibold text-neutral-200">More questions (optional)</div>
+                <ul data-el="quickReadQuestionsMore" class="list-disc list-inside mt-1 space-y-1"></ul>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- INCENTIVES -->
+      <details class="glass rounded-3xl p-4 border border-neutral-800 soft-shadow pop">
+        <summary class="cursor-pointer">
+          <div class="flex justify-between items-center">
+            <div class="text-sm font-semibold">🏷️ Incentives & rebates</div>
+            <span class="text-[11px] text-neutral-400">Tap for details</span>
+          </div>
+          <div class="mt-2 text-xs font-bold" data-el="incentivesSummary">$0–$0 typical</div>
+          <div class="text-[11px] text-neutral-400 mt-1">Federal • State • Utility</div>
+        </summary>
+
+        <div class="mt-4 space-y-3 text-xs">
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="font-semibold">🇺🇸 Federal</div>
+            <div>Tax credit example: <b>20–30%</b> up to <b>$600–$2,000</b></div>
+            <div class="text-[11px] text-neutral-400 mt-1">Claimed by homeowner when filing taxes.</div>
+          </div>
+
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="font-semibold">🏛️ State</div>
+            <div>Program rebates often <b>$500–$1,500</b> (varies by state & funding)</div>
+            <div class="text-[11px] text-neutral-400 mt-1">Eligibility can depend on equipment + participating contractors.</div>
+          </div>
+
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="font-semibold">⚡ Local / Utility</div>
+            <div>Flat rebates typically <b>$250–$750</b></div>
+            <div class="text-[11px] text-neutral-400 mt-1">Often applied at install or submitted after completion.</div>
+          </div>
+
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="font-semibold">🔗 Helpful links</div>
+            <div class="mt-2 flex flex-col gap-2">
+              <a href="https://www.irs.gov/pub/irs-pdf/f5695.pdf" target="_blank"
+                class="text-emerald-300 underline text-[11px]">
+                IRS Form 5695 (PDF)
+              </a>
+              <a href="https://www.energystar.gov/rebate-finder" target="_blank"
+                class="text-emerald-300 underline text-[11px]">
+                ENERGY STAR Rebate Finder
+              </a>
+            </div>
+          </div>
+
+          <div class="text-[11px] text-neutral-400">
+            LEAF identifies likely incentives based on system type and location. Contractors confirm eligibility,
+            pricing, and paperwork requirements.
+          </div>
+        </div>
+      </details>
+
+      <!-- DOES THIS MAKE SENSE? -->
+      <section class="glass rounded-3xl p-4 border border-neutral-800 soft-shadow pop">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-semibold">🧠 Does this decision make sense?</div>
+          <span data-el="decisionBadge" class="text-[11px] px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-200 border border-emerald-500/30">
+            Likely yes ✅
+          </span>
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="text-neutral-400">Install cost (slider)</div>
+            <div class="text-base font-bold" data-el="msInstallCost">$0</div>
+          </div>
+
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="text-neutral-400">Estimated savings (at this price)</div>
+            <div class="text-base font-bold" data-el="msSavingsRange">$0–$0/mo</div>
+            <div class="text-[11px] text-neutral-400 mt-1">Higher cost can bump savings slightly, but ROI may drop.</div>
+          </div>
+
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3 col-span-2">
+            <div class="text-neutral-400">Estimated net cost (after incentives)</div>
+            <div class="text-base font-bold" data-el="msNetCostRange">$0–$0</div>
+            <div class="text-[11px] text-neutral-400 mt-1">
+              Based on incentive estimates shown above (contractor confirms final eligibility).
+            </div>
+          </div>
+
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="text-neutral-400">Quote value check</div>
+            <div class="text-base font-bold" data-el="msValueCheck">Within range ✅</div>
+          </div>
+          <div class="rounded-2xl bg-neutral-900 border border-neutral-800 p-3">
+            <div class="text-neutral-400">What this means</div>
+            <div class="text-[11px] text-neutral-300 mt-1" data-el="msMeaning">
+              Quotes in-range usually indicate predictable scope + fair pricing.
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 rounded-2xl bg-black/30 border border-neutral-800 p-3">
+          <div class="text-xs text-neutral-400">Decision summary</div>
+          <div class="text-sm font-semibold mt-1" data-el="msSummaryHeadline">This looks financially reasonable.</div>
+          <div class="text-[11px] text-neutral-300 mt-1" data-el="msSummaryText">
+            If the contractor quote lands within the LEAF range, this is typically a strong replacement decision.
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</template>
+
+<script>
+  // =========================================================
+  // 1) SNAPSHOT DATA (ADD AS MANY AS YOU WANT)
+  // =========================================================
+  // Image paths: put them in your repo, ex: /images/...
+  const SNAPSHOTS = [
+    {
+      systemTitle: "🔥 HVAC • Gas Furnace",
+      systemSubtitle: "Direct-replacement gas furnace upgrade",
+      currentName: "Existing gas furnace",
+      recommendedName: "High-efficiency gas furnace",
+
+      currentImg: "images/old-furnace.png",
+      upgradeImg: "images/new-furnace.png",
+
+      leafPriceMin: 5000,
+      leafPriceMax: 7000,
+      baseSavingsMin: 19,
+      baseSavingsMax: 35,
+
+      incentivesLow: 750,
+      incentivesHigh: 3000,
+
+      // Optional: display-only fields
+      currentCostText: "$350–$450",
+      currentCarbonText: "3,400–4,000 lbs/yr",
+      upgradeCarbonText: "1,600–2,400 lbs/yr",
+      yearlySavingsText: "$170–$260",
+    },
+    {
+      systemTitle: "💧 Water Heater • Gas Tank",
+      systemSubtitle: "High-efficiency replacement water heater",
+      currentName: "Existing gas water heater",
+      recommendedName: "High-efficiency gas water heater",
+
+      currentImg: "images/old-water-heater.png",
+      upgradeImg: "images/new-water-heater.png",
+
+      leafPriceMin: 1800,
+      leafPriceMax: 3200,
+      baseSavingsMin: 6,
+      baseSavingsMax: 14,
+
+      incentivesLow: 0,
+      incentivesHigh: 800,
+
+      currentCostText: "$120–$180",
+      currentCarbonText: "800–1,200 lbs/yr",
+      upgradeCarbonText: "500–850 lbs/yr",
+      yearlySavingsText: "$70–$140",
+    },
+    {
+      systemTitle: "🪟 Windows • Mixed",
+      systemSubtitle: "Upgrade to high-performance windows",
+      currentName: "Existing mixed windows",
+      recommendedName: "High-performance window package",
+
+      currentImg: "images/old-windows.png",
+      upgradeImg: "images/new-windows.png",
+
+      leafPriceMin: 12000,
+      leafPriceMax: 22000,
+      baseSavingsMin: 25,
+      baseSavingsMax: 55,
+
+      incentivesLow: 0,
+      incentivesHigh: 600,
+
+      currentCostText: "$420–$600",
+      currentCarbonText: "1,800–2,600 lbs/yr",
+      upgradeCarbonText: "1,200–1,900 lbs/yr",
+      yearlySavingsText: "$240–$520",
+    }
+  ];
+
+  // =========================================================
+  // 2) RENDER PAGES + PAGER (NO MORE HARDCODED "PAGE 1/2/3")
+  // =========================================================
+  const pagesEl = document.getElementById("pages");
+  const pagerEl = document.getElementById("pager");
+  const pageLabel = document.getElementById("pageLabel");
+  const tpl = document.getElementById("snapshotTemplate");
+
+  function buildUI(){
+    // pages
+    SNAPSHOTS.forEach((_s, i) => {
+      const node = tpl.content.cloneNode(true);
+      const page = node.querySelector(".leaf-page");
+      page.dataset.pageIndex = String(i);
+      pagesEl.appendChild(node);
+    });
+
+    // dots
+    pagerEl.innerHTML = "";
+    SNAPSHOTS.forEach((_s, i) => {
+      const b = document.createElement("button");
+      b.className = "dot" + (i === 0 ? " active" : "");
+      b.setAttribute("aria-label", `Go to snapshot ${i + 1}`);
+      b.dataset.page = String(i);
+      pagerEl.appendChild(b);
+    });
+
+    setActiveDot(0);
+
+    // init each page after DOM exists
+    const pages = Array.from(document.querySelectorAll(".leaf-page"));
+    pages.forEach((page, idx) => initLeafPage(page, idx));
+  }
+
+  function setActiveDot(i){
+    const dots = Array.from(pagerEl.querySelectorAll(".dot"));
+    dots.forEach((d, idx) => d.classList.toggle("active", idx === i));
+    pageLabel.textContent = `Snapshot ${i + 1} of ${dots.length}`;
+  }
+
+  function scrollToPage(i){
+    const w = pagesEl.clientWidth;
+    pagesEl.scrollTo({ left: i * w, behavior: "smooth" });
+    setActiveDot(i);
+  }
+
+  pagerEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-page]");
+    if (!btn) return;
+    scrollToPage(Number(btn.dataset.page));
+  });
+
+  pagesEl.addEventListener("scroll", () => {
+    const w = pagesEl.clientWidth || 1;
+    const i = Math.round(pagesEl.scrollLeft / w);
+    const clamped = Math.max(0, Math.min(SNAPSHOTS.length - 1, i));
+    setActiveDot(clamped);
+  });
+
+  window.addEventListener("resize", () => {
+    const dots = Array.from(pagerEl.querySelectorAll(".dot"));
+    const i = dots.findIndex(d => d.classList.contains("active"));
+    scrollToPage(Math.max(0, i));
+  });
+
+  // =========================================================
+  // 3) PER-PAGE LOGIC
+  // =========================================================
+  const formatMoney = (n) => "$" + Math.round(n).toLocaleString("en-US");
+  const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+  function setBadge(el, tone, text){
+    const tones = {
+      good: "bg-emerald-500/15 text-emerald-200 border border-emerald-500/30",
+      warn: "bg-yellow-500/15 text-yellow-200 border border-yellow-500/30",
+      bad:  "bg-red-500/15 text-red-200 border border-red-500/25",
+      neutral: "bg-neutral-800/60 text-neutral-200 border border-neutral-700"
+    };
+    const isSquare = el.classList.contains("rounded-md");
+    el.className = `text-[11px] px-3 py-1 ${isSquare ? "rounded-md" : "rounded-full"} ${tones[tone] || tones.neutral}`;
+    el.textContent = text;
+  }
+
+  function setBand(okEl, sliderMin, sliderMax, okMin, okMax){
+    const span = sliderMax - sliderMin;
+    const L = ((okMin - sliderMin) / span) * 100;
+    const R = ((okMax - sliderMin) / span) * 100;
+    okEl.style.left = `${clamp(L, 0, 100)}%`;
+    okEl.style.width = `${Math.max(0, clamp(R, 0, 100) - clamp(L, 0, 100))}%`;
+  }
+
+  function setFill(fillEl, sliderMin, sliderMax, value){
+    const span = sliderMax - sliderMin;
+    const pct = ((value - sliderMin) / span) * 100;
+    fillEl.style.width = `${clamp(pct, 0, 100)}%`;
+  }
+
+  function setMarker(markerEl, sliderMin, sliderMax, value){
+    const span = sliderMax - sliderMin;
+    const pct = ((value - sliderMin) / span) * 100;
+    markerEl.style.left = `${clamp(pct, 0, 100)}%`;
+  }
+
+  function computeNetCostRange(installCost, incentivesLow, incentivesHigh){
+    const netLow = Math.max(0, installCost - incentivesHigh);
+    const netHigh = Math.max(0, installCost - incentivesLow);
+    return { netLow, netHigh };
+  }
+
+  function formatMoneyRange(a, b){
+    return `${formatMoney(a)}–${formatMoney(b)}`;
+  }
+
+  function nudgeAnim(el, cls){
+    if (!el) return;
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), 320);
+  }
+
+  function thumbBounce(inputEl){
+    if (!inputEl) return;
+    inputEl.classList.remove("thumb-bounce");
+    void inputEl.offsetWidth;
+    inputEl.classList.add("thumb-bounce");
+    setTimeout(() => inputEl.classList.remove("thumb-bounce"), 260);
+  }
+
+  function initLeafPage(root, pageIndex){
+    const snap = SNAPSHOTS[pageIndex] || SNAPSHOTS[0];
+
+    const LEAF_PRICE_MIN = snap.leafPriceMin;
+    const LEAF_PRICE_MAX = snap.leafPriceMax;
+
+    const BASE_SAVINGS_MIN = snap.baseSavingsMin;
+    const BASE_SAVINGS_MAX = snap.baseSavingsMax;
+
+    const INCENTIVES_LOW  = snap.incentivesLow;
+    const INCENTIVES_HIGH = snap.incentivesHigh;
+
+    const COST_UNREALISTIC_BELOW = LEAF_PRICE_MIN - 500;
+    const COST_OVERPRICED_ABOVE  = LEAF_PRICE_MAX + 3000;
+
+    function dynamicSavingsRange(price){
+      const over = Math.max(0, price - LEAF_PRICE_MAX);
+      const steps = Math.floor(over / 1000);
+      const bump = steps * 2; // +$2/mo per $1k above max
+      return { min: BASE_SAVINGS_MIN + bump, max: BASE_SAVINGS_MAX + bump };
+    }
+
+    function classifyCost(price){
+      if (price < COST_UNREALISTIC_BELOW) return "unreal_low";
+      if (price < LEAF_PRICE_MIN) return "low";
+      if (price > COST_OVERPRICED_ABOVE) return "over";
+      if (price > LEAF_PRICE_MAX) return "likely_over";
+      return "in";
+    }
+
+    function quickReadMessage(costClass){
+      const premiumWhy = [
+        "More expensive systems can provide slightly higher savings (better efficiency/controls/commissioning) — usually incremental.",
+        "ROI can drop when cost climbs faster than savings. A premium quote should come with clear, measurable value."
+      ];
+
+      if (costClass === "unreal_low"){
+        return {
+          tone: "warn",
+          headline: "This price is extremely low — verify scope before scheduling.",
+          why: [
+            "Very low pricing often means partial scope or missing line items.",
+            "Confirming scope protects you from surprise add-ons later."
+          ],
+          qVisible: [
+            "Is this a full replacement quote (equipment, labor, permits, startup/commissioning)?",
+            "What’s excluded that could be added later (venting, thermostat, disposal, permits)?"
+          ],
+          qMore: [
+            "Can you itemize model numbers + warranty terms in writing?",
+            "Is there any scenario where price changes after work begins?"
+          ]
+        };
+      }
+
+      if (costClass === "low"){
+        return {
+          tone: "good",
+          headline: "Competitive quote — great sign if scope is complete.",
+          why: [
+            "Competitive bids happen and can be a win for the homeowner.",
+            "A quick scope check ensures it’s apples-to-apples."
+          ],
+          qVisible: [
+            "Can you walk me through exactly what’s included in this price?",
+            "Are permits/inspections and commissioning included?"
+          ],
+          qMore: [
+            "Is the thermostat included? What about haul-away/disposal?",
+            "Can you confirm final scope and model numbers in writing?"
+          ]
+        };
+      }
+
+      if (costClass === "in"){
+        return {
+          tone: "good",
+          headline: "This looks like a fair, in-range quote.",
+          why: [
+            "Pricing aligns with what LEAF typically sees for this replacement category.",
+            "In-range quotes usually indicate predictable scope and fewer surprises."
+          ],
+          qVisible: [
+            "What’s the install timeline and what prep do you need from me?",
+            "What warranty coverage comes with the equipment and labor?"
+          ],
+          qMore: [
+            "Do you handle permits and inspection sign-off?",
+            "What maintenance keeps performance strong long-term?"
+          ]
+        };
+      }
+
+      if (costClass === "likely_over"){
+        return {
+          tone: "warn",
+          headline: "Higher than LEAF range — confirm what’s driving the price.",
+          why: [
+            "Higher quotes can be justified by site conditions (access, venting, ductwork, electrical).",
+            "It can also reflect premium add-ons you may not need.",
+            ...premiumWhy
+          ],
+          qVisible: [
+            "What specifically is driving the price above typical range?",
+            "Is there a simpler option that still meets the goals?"
+          ],
+          qMore: [
+            "Can you provide an itemized quote so I can compare bids accurately?",
+            "Which add-ons are optional vs required?"
+          ]
+        };
+      }
+
+      return {
+        tone: "warn",
+        headline: "Major caution — this looks overpriced for the category.",
+        why: [
+          "This is significantly above typical replacement pricing.",
+          "Before committing, compare at least one more itemized bid.",
+          ...premiumWhy
+        ],
+        qVisible: [
+          "Can you itemize the quote (equipment, labor, permits, extras) line-by-line?",
+          "What would the ‘standard replacement’ option cost and what changes?"
+        ],
+        qMore: [
+          "Are there scope items here that belong in a separate project (duct redesign, electrical upgrades)?",
+          "Can you confirm model numbers and efficiency details to justify pricing?"
+        ]
+      };
+    }
+
+    const $ = (sel) => root.querySelector(sel);
+
+    // Text + images
+    $('[data-el="heroSystemTitle"]').textContent = snap.systemTitle;
+    $('[data-el="heroSystemSubtitle"]').textContent = snap.systemSubtitle;
+
+    const curImg = $('[data-el="currentImg"]');
+    const upImg  = $('[data-el="upgradeImg"]');
+    if (curImg) curImg.src = snap.currentImg || "";
+    if (upImg)  upImg.src  = snap.upgradeImg || "";
+
+    const currentName = $('[data-el="currentName"]');
+    const recommendedName = $('[data-el="recommendedName"]');
+    if (currentName) currentName.textContent = snap.currentName || "Existing system";
+    if (recommendedName) recommendedName.textContent = snap.recommendedName || "Recommended system";
+
+    const currentCost = $('[data-el="currentCost"]');
+    const currentCarbon = $('[data-el="currentCarbon"]');
+    const upgradeCarbon = $('[data-el="upgradeCarbon"]');
+    const yearlySavings = $('[data-el="yearlySavings"]');
+
+    if (currentCost) currentCost.textContent = snap.currentCostText || "$0–$0";
+    if (currentCarbon) currentCarbon.textContent = snap.currentCarbonText || "0–0 lbs/yr";
+    if (upgradeCarbon) upgradeCarbon.textContent = snap.upgradeCarbonText || "0–0 lbs/yr";
+    if (yearlySavings) yearlySavings.textContent = snap.yearlySavingsText || "$0–$0";
+
+    // Range displays
+    const installRangeText = `${formatMoney(LEAF_PRICE_MIN)}–${formatMoney(LEAF_PRICE_MAX)}`;
+    $('[data-el="leafInstallRangeBox"]').textContent = installRangeText;
+    $('[data-el="leafInstallRangeInline"]').textContent = installRangeText;
+
+    // Incentives summary
+    const incentivesSummary = $('[data-el="incentivesSummary"]');
+    if (incentivesSummary){
+      if (INCENTIVES_LOW === 0 && INCENTIVES_HIGH === 0) incentivesSummary.textContent = `No incentives estimated`;
+      else if (INCENTIVES_LOW === 0) incentivesSummary.textContent = `Up to ${formatMoney(INCENTIVES_HIGH)} typical`;
+      else incentivesSummary.textContent = `${formatMoney(INCENTIVES_LOW)}–${formatMoney(INCENTIVES_HIGH)}+ typical`;
+    }
+
+    // Slider setup (per snapshot)
+    const priceSlider = $('[data-el="priceSlider"]');
+    const sliderMin = Math.max(0, LEAF_PRICE_MIN - 2000);
+    const sliderMax = LEAF_PRICE_MAX + 8000;
+    priceSlider.min = String(sliderMin);
+    priceSlider.max = String(sliderMax);
+
+    const leafMid = Math.round((LEAF_PRICE_MIN + LEAF_PRICE_MAX) / 2);
+    priceSlider.value = String(leafMid);
+
+    // Elements
+    const priceValue = $('[data-el="priceValue"]');
+    const staticPriceValue = $('[data-el="staticPriceValue"]');
+    const msInstallCost = $('[data-el="msInstallCost"]');
+
+    const dynSavings = $('[data-el="dynamicSavingsRange"]');
+    const summarySavings = $('[data-el="summarySavingsRange"]');
+    const heroSavingsPill = $('[data-el="heroSavingsPill"]');
+    const msSavingsRange = $('[data-el="msSavingsRange"]');
+
+    const priceBandOK = $('[data-el="priceBandOK"]');
+    const priceBandFill = $('[data-el="priceBandFill"]');
+
+    const staticCostOK = $('[data-el="staticCostOK"]');
+    const staticCostFill = $('[data-el="staticCostFill"]');
+    const staticCostMarker = $('[data-el="staticCostMarker"]');
+    const staticCostMinLabel = $('[data-el="staticCostMinLabel"]');
+    const staticCostMaxLabel = $('[data-el="staticCostMaxLabel"]');
+
+    const priceBandMinLabel = $('[data-el="priceBandMinLabel"]');
+    const priceBandMaxLabel = $('[data-el="priceBandMaxLabel"]');
+
+    const costBadge = $('[data-el="costBadge"]');
+    const overallBadge = $('[data-el="overallBadge"]');
+    const overallHeadline = $('[data-el="overallHeadline"]');
+    const quickReadWhy = $('[data-el="quickReadWhy"]');
+    const qVisible = $('[data-el="quickReadQuestionsVisible"]');
+    const qMore = $('[data-el="quickReadQuestionsMore"]');
+
+    const decisionBadge = $('[data-el="decisionBadge"]');
+    const msNetCostRange = $('[data-el="msNetCostRange"]');
+    const msValueCheck = $('[data-el="msValueCheck"]');
+    const msMeaning = $('[data-el="msMeaning"]');
+    const msSummaryHeadline = $('[data-el="msSummaryHeadline"]');
+    const msSummaryText = $('[data-el="msSummaryText"]');
+
+    const resetBtn = $('[data-el="resetBtn"]');
+    const renderList = (el, items) => { if (el) el.innerHTML = (items || []).map(t => `<li>${t}</li>`).join(""); };
+
+    function updateUI(){
+      const price = Number(priceSlider.value);
+
+      if (priceValue) priceValue.textContent = formatMoney(price);
+      if (staticPriceValue) staticPriceValue.textContent = formatMoney(price);
+      if (msInstallCost) msInstallCost.textContent = formatMoney(price);
+
+      const dyn = dynamicSavingsRange(price);
+      const savText = `$${dyn.min}–$${dyn.max}/mo`;
+
+      if (dynSavings) dynSavings.textContent = savText;
+      if (summarySavings) summarySavings.textContent = `$${dyn.min}–$${dyn.max}`;
+      if (heroSavingsPill) heroSavingsPill.textContent = `Save ~$${dyn.min}–$${dyn.max}/mo`;
+      if (msSavingsRange) msSavingsRange.textContent = savText;
+
+      if (priceBandMinLabel) priceBandMinLabel.textContent = formatMoney(LEAF_PRICE_MIN);
+      if (priceBandMaxLabel) priceBandMaxLabel.textContent = formatMoney(LEAF_PRICE_MAX);
+
+      if (priceBandOK) setBand(priceBandOK, sliderMin, sliderMax, LEAF_PRICE_MIN, LEAF_PRICE_MAX);
+      if (priceBandFill) setFill(priceBandFill, sliderMin, sliderMax, price);
+
+      if (staticCostMinLabel) staticCostMinLabel.textContent = formatMoney(LEAF_PRICE_MIN);
+      if (staticCostMaxLabel) staticCostMaxLabel.textContent = formatMoney(LEAF_PRICE_MAX);
+      if (staticCostOK) setBand(staticCostOK, sliderMin, sliderMax, LEAF_PRICE_MIN, LEAF_PRICE_MAX);
+      if (staticCostFill) setFill(staticCostFill, sliderMin, sliderMax, price);
+      if (staticCostMarker) setMarker(staticCostMarker, sliderMin, sliderMax, price);
+
+      const costClass = classifyCost(price);
+
+      if (costBadge){
+        if (costClass === "unreal_low") setBadge(costBadge, "bad", "Unrealistic");
+        else if (costClass === "low") setBadge(costBadge, "warn", "Low (verify scope)");
+        else if (costClass === "over") setBadge(costBadge, "bad", "Overpriced");
+        else if (costClass === "likely_over") setBadge(costBadge, "warn", "Likely overpriced");
+        else setBadge(costBadge, "good", "Within range");
+      }
+
+      const msg = quickReadMessage(costClass);
+
+      if (overallBadge){
+        if (costClass === "over") setBadge(overallBadge, "bad", "Major caution 🚩");
+        else if (msg.tone === "good") setBadge(overallBadge, "good", "Looks good ✅");
+        else setBadge(overallBadge, "warn", "Proceed smart ⚠️");
+      }
+      if (overallHeadline) overallHeadline.textContent = msg.headline;
+
+      renderList(quickReadWhy, msg.why);
+      renderList(qVisible, msg.qVisible);
+      renderList(qMore, msg.qMore);
+
+      const net = computeNetCostRange(price, INCENTIVES_LOW, INCENTIVES_HIGH);
+      const netMin = Math.min(net.netLow, net.netHigh);
+      const netMax = Math.max(net.netLow, net.netHigh);
+      if (msNetCostRange) msNetCostRange.textContent = formatMoneyRange(netMin, netMax);
+
+      if (msValueCheck && msMeaning){
+        if (costClass === "in"){
+          msValueCheck.textContent = "Within range ✅";
+          msMeaning.textContent = "Quotes in-range usually indicate predictable scope + fair pricing.";
+        } else if (costClass === "low"){
+          msValueCheck.textContent = "Below range ⚠️";
+          msMeaning.textContent = "Could be a great deal — just confirm it’s a full scope replacement quote.";
+        } else if (costClass === "unreal_low"){
+          msValueCheck.textContent = "Very low 🚩";
+          msMeaning.textContent = "High chance something is missing. Get scope in writing before scheduling.";
+        } else if (costClass === "likely_over"){
+          msValueCheck.textContent = "Above range ⚠️";
+          msMeaning.textContent = "Premium cost can bump savings slightly, but ROI may drop. Ask what justifies the cost.";
+        } else {
+          msValueCheck.textContent = "Far above range 🚩";
+          msMeaning.textContent = "This is likely overpriced. Compare another itemized bid before committing.";
+        }
+      }
+
+      if (decisionBadge && msSummaryHeadline && msSummaryText){
+        if (costClass === "over"){
+          setBadge(decisionBadge, "bad", "Unclear 🚩");
+          msSummaryHeadline.textContent = "This needs a closer look.";
+          msSummaryText.textContent =
+            "The quote is well above typical range. Request an itemized scope and compare at least one more bid.";
+        } else if (costClass === "in"){
+          setBadge(decisionBadge, "good", "Likely yes ✅");
+          msSummaryHeadline.textContent = "This looks financially reasonable.";
+          msSummaryText.textContent =
+            "If the contractor quote lands within the LEAF range, this is typically a strong replacement decision.";
+        } else {
+          setBadge(decisionBadge, "warn", "Likely yes (with clarity) ⚠️");
+          msSummaryHeadline.textContent = "This can still make sense — confirm a few details.";
+          msSummaryText.textContent =
+            "Use the questions above to confirm scope and what’s driving price. Premium cost can bump savings slightly, but ROI often drops if price rises too fast.";
+        }
+      }
+    }
+
+    function resetToLeafMid(){
+      const mid = Math.round((LEAF_PRICE_MIN + LEAF_PRICE_MAX) / 2);
+      if (navigator.vibrate) navigator.vibrate([10]);
+      priceSlider.value = mid;
+      thumbBounce(priceSlider);
+      if (resetBtn) nudgeAnim(resetBtn, "reset-pop");
+      updateUI();
+    }
+
+    priceSlider.addEventListener("input", updateUI);
+    if (resetBtn) resetBtn.addEventListener("click", resetToLeafMid);
+
+    updateUI();
+  }
+
+  // =========================================================
+  // BOOT
+  // =========================================================
+  buildUI();
+</script>
+
+</body>
+</html>
