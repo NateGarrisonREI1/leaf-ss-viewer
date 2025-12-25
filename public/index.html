@@ -904,10 +904,23 @@ Then set currentImg: "images/old-furnace.png"
     $('[data-el="heroSystemTitle"]').textContent = snap.systemTitle;
     $('[data-el="heroSystemSubtitle"]').textContent = snap.systemSubtitle;
 
-    const curImg = $('[data-el="currentImg"]');
-    const upImg  = $('[data-el="upgradeImg"]');
-    if (curImg) curImg.src = snap.currentImg || "";
-    if (upImg)  upImg.src  = snap.upgradeImg || "";
+ const curImg = $('[data-el="currentImg"]');
+const upImg  = $('[data-el="upgradeImg"]');
+
+const FALLBACK_CURRENT =
+  "https://placehold.co/300x300?text=Current+System";
+
+const FALLBACK_UPGRADE =
+  "https://placehold.co/300x300?text=Recommended+Upgrade";
+
+if (curImg) {
+  curImg.src = snap.currentImg || FALLBACK_CURRENT;
+}
+
+if (upImg) {
+  upImg.src = snap.upgradeImg || FALLBACK_UPGRADE;
+}
+
 
     const currentName = $('[data-el="currentName"]');
     const recommendedName = $('[data-el="recommendedName"]');
